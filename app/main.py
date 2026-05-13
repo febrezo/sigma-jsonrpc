@@ -35,6 +35,7 @@ app = FastAPI(
 @app.on_event('startup')
 def startup_event() -> None:
     logger.info('starting service %s v%s', settings.service_name, settings.service_version)
+    engine.warm_up_discovery()
     if settings.auth_enabled:
         logger.info('jsonrpc authentication enabled')
     elif settings.auth_required:

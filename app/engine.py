@@ -23,10 +23,24 @@ class _PluginCache:
     items: list[PluginInfo]
 
 
+@dataclass
+class _BackendCache:
+    expires_at: float
+    items: list[str]
+
+
 class SigmaEngine:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._plugins_cache: _PluginCache | None = None
+        self._backends_cache: _BackendCache | None = None
+
+    def warm_up_discovery(self) -> None:
+        """Preload backend discovery during startup to avoid first-call latency."""
+        try:
+            self.list_backends(force_refresh=True)
+        except Exception as exc:
+            logger.warning('startup backend warm-up failed: %s', exc)
 
     def sigma_available(self) -> bool:
         try:
@@ -51,8 +65,24 @@ class SigmaEngine:
         )
         return plugins
 
-    def list_backends(self) -> list[str]:
-        entries = [p.identifier for p in self.list_plugins() if p.plugin_type == 'backend']
+    def list_backends(self, *, force_refresh: bool = False) -> list[str]:
+        now = time.time()
+        if not force_refresh and self._backends_cache and self._backends_cache.expires_at > now:
+            entries = list(self._backends_cache.items)
+        else:
+            entries = self._list_targets_fast()
+            if not entries:
+                # Fallback for sigma-cli variants where `list targets` is unavailable.
+                entries = [
+                    p.identifier
+                    for p in self.list_plugins()
+                    if p.plugin_type == 'backend' and p.identifier.lower() != 'sigma'
+                ]
+            self._backends_cache = _BackendCache(
+                expires_at=now + max(1, self.settings.discovery_cache_ttl_seconds),
+                items=sorted(set(entries)),
+            )
+
         allow = self.settings.allowed_backends
         if allow:
             entries = [item for item in entries if item.lower() in allow]
@@ -64,11 +94,15 @@ class SigmaEngine:
             target = self._validate_identifier(target, field='target')
             completed = self._run_sigma(['list', 'pipelines', target])
             if completed.returncode == 0:
-                entries = _parse_simple_list(completed.stdout)
+                entries = _parse_identifier_table(completed.stdout)
             else:
                 entries = [p.identifier for p in self.list_plugins() if p.plugin_type == 'pipeline']
         else:
-            entries = [p.identifier for p in self.list_plugins() if p.plugin_type == 'pipeline']
+            completed = self._run_sigma(['list', 'pipelines'])
+            if completed.returncode == 0:
+                entries = _parse_identifier_table(completed.stdout)
+            else:
+                entries = [p.identifier for p in self.list_plugins() if p.plugin_type == 'pipeline']
 
         allow = self.settings.allowed_pipelines
         if allow:
@@ -82,8 +116,8 @@ class SigmaEngine:
             if validate_run.returncode == 0:
                 return ValidateResult(valid=True, errors=[], warnings=[])
 
-            # Some sigma-cli versions may not expose `validate`; fallback to convert-to-sigma check.
-            fallback_run = self._run_sigma(['convert', '-t', 'sigma', rule_path])
+            # Some sigma-cli versions may not expose `validate`; fallback to a known target.
+            fallback_run = self._run_sigma(['convert', '-t', 'splunk', '--without-pipeline', rule_path])
             if fallback_run.returncode == 0:
                 return ValidateResult(valid=True, errors=[], warnings=[])
 
@@ -145,6 +179,13 @@ class SigmaEngine:
                 'timeout_seconds': self.settings.sigma_command_timeout,
             },
         }
+
+    def _list_targets_fast(self) -> list[str]:
+        # `sigma list targets` is much faster than `sigma plugin list` in large installs.
+        completed = self._run_sigma(['list', 'targets'], timeout=min(10, self.settings.sigma_command_timeout))
+        if completed.returncode != 0:
+            return []
+        return _parse_identifier_table(completed.stdout)
 
     def _run_sigma(
         self,
@@ -285,6 +326,22 @@ def _parse_simple_list(stdout: str) -> list[str]:
             continue
         items.append(line.split()[0].strip().lower())
     return items
+
+
+def _parse_identifier_table(stdout: str) -> list[str]:
+    rows = [_split_table_row(line) for line in stdout.splitlines()]
+    items: list[str] = []
+    for row in rows:
+        if not row or _is_separator_row(row):
+            continue
+        first = row[0].strip().lower()
+        if first in {'identifier', 'id', 'name'}:
+            continue
+        if first.startswith(('+', '-', 'usage:', 'try ')):
+            continue
+        if _SAFE_IDENTIFIER_RE.match(first):
+            items.append(first)
+    return sorted(set(items))
 
 
 def _fallback_plugins_parse(lines: list[str]) -> list[PluginInfo]:

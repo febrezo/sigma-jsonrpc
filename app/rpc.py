@@ -109,6 +109,9 @@ class RpcDispatcher:
         pipeline = _optional_string(params, 'pipeline')
         output_format = _optional_string(params, 'format')
         without_pipeline = _optional_bool(params, 'without_pipeline')
+        if pipeline is None and 'without_pipeline' not in params:
+            # Keep conversion resilient for older clients that don't send this flag.
+            without_pipeline = True
         return self.engine.convert_rule(
             rule,
             target=target,

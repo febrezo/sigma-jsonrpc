@@ -141,6 +141,16 @@ Language can be selected from the top combo box or forced with the query paramet
 
 If the browser language is unsupported, the UI defaults to English (`en`).
 
+## Interface Screenshots
+
+Home page:
+
+![sigma-jsonrpc home](docs/sigma-jsonrpc-home.png)
+
+Live converter panel:
+
+![sigma-jsonrpc live converter](docs/sigma-jsonrpc-example.png)
+
 ### `GET /health`
 
 Response:

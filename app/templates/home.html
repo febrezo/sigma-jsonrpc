@@ -267,11 +267,19 @@
 
     .controls-row {
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       flex-wrap: wrap;
       gap: .8rem;
       margin-top: .15rem;
       padding: 0;
+    }
+    .ctrl-stack {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: .35rem;
+      min-width: 280px;
+      max-width: 420px;
+      flex: 1 1 360px;
     }
     .ctrl-label { color: var(--muted); font-size: .84rem; white-space: nowrap; }
     .ctrl-select {
@@ -283,7 +291,7 @@
       font-family: inherit;
       font-size: .84rem;
       cursor: pointer;
-      min-width: 150px;
+      min-width: 180px;
       outline: none;
     }
     .btn-convert {
@@ -468,15 +476,17 @@
 
       <!-- Controls: backend, pipeline, convert -->
       <div class="controls-row">
-        <span class="ctrl-label">{{ ui.try_backend_label }}:</span>
-        <select id="backend-select" class="ctrl-select">
-          <option value="">— loading —</option>
-        </select>
-        <span class="ctrl-label">{{ ui.try_pipeline_label }}:</span>
-        <select id="pipeline-select" class="ctrl-select"
-                data-none-label="{{ ui.try_pipeline_none }}">
-          <option value="">{{ ui.try_pipeline_none }}</option>
-        </select>
+        <div class="ctrl-stack">
+          <span class="ctrl-label">📍 Destination Platform:</span>
+          <select id="backend-select" class="ctrl-select">
+            <option value="">— loading available platforms —</option>
+          </select>
+          <span class="ctrl-label">🔗 Optional Pipeline:</span>
+          <select id="pipeline-select" class="ctrl-select"
+                  data-none-label="{{ ui.try_pipeline_none }}">
+            <option value="">{{ ui.try_pipeline_none }}</option>
+          </select>
+        </div>
         <button class="btn-convert" id="convert-btn">{{ ui.try_convert_btn }}</button>
       </div>
 
@@ -510,15 +520,11 @@
 
   /* ── Carousel open / close ── */
   const scene = document.getElementById('scene');
-  let resourcesLoaded = false;
 
   document.getElementById('open-try').addEventListener('click', () => {
     window.scrollTo(0, 0);
     scene.classList.add('panel-open');
-    if (!resourcesLoaded) {
-      loadBackends();
-      resourcesLoaded = true;
-    }
+    loadBackends();
   });
 
   document.getElementById('close-try').addEventListener('click', () => {
@@ -540,25 +546,60 @@
     }).then(r => r.json());
   }
 
+  function showConverterError(message, detail) {
+    const out = document.getElementById('result-output');
+    const extra = detail ? '\n\n' + detail : '';
+    out.value = '⚠  ' + message + extra;
+    out.classList.add('error-output');
+  }
+
+  function setPipelineDisabled(disabled, message) {
+    const sel = document.getElementById('pipeline-select');
+    sel.innerHTML = '';
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = message || 'no pipelines available';
+    sel.appendChild(opt);
+    sel.disabled = !!disabled;
+  }
+
   /* ── Load backends ── */
-  const FALLBACK_BACKENDS = [
-    'splunk', 'es-qs', 'eql', 'microsoft365defender',
-    'azure-monitor', 'loki', 'qradar-epl', 'insightidr', 'sigma',
-  ];
+  const loadedBackends = new Set();
 
   async function loadBackends() {
     const sel = document.getElementById('backend-select');
     let items = [];
     try {
       const resp = await rpcCall('sigma.backends.list', {});
+      if (resp.error) {
+        const detail = resp.error.data?.detail || '';
+        showConverterError('No se pudo cargar la lista de destinos', detail || resp.error.message);
+        sel.innerHTML = '<option value="">— unavailable —</option>';
+          setPipelineDisabled(true, 'pipelines unavailable');
+        return;
+      }
       const raw = resp.result?.items || [];
       items = raw
         .map(i => (typeof i === 'string') ? i : (i.identifier || i.name || ''))
-        .filter(Boolean);
-    } catch (_) {}
-    if (!items.length) items = FALLBACK_BACKENDS;
+        .filter(Boolean)
+        .filter(name => String(name).toLowerCase() !== 'sigma');
+    } catch (err) {
+      showConverterError('No se pudo cargar la lista de destinos', err?.message || 'network error');
+      sel.innerHTML = '<option value="">— unavailable —</option>';
+      setPipelineDisabled(true, 'pipelines unavailable');
+      return;
+    }
+    if (!items.length) {
+      showConverterError('No hay destinos disponibles para convertir reglas');
+      sel.innerHTML = '<option value="">— unavailable —</option>';
+      setPipelineDisabled(true, 'pipelines unavailable');
+      return;
+    }
+
+    loadedBackends.clear();
     sel.innerHTML = '';
     items.forEach((name, idx) => {
+      loadedBackends.add(String(name).trim().toLowerCase());
       const o = document.createElement('option');
       o.value = name; o.textContent = name;
       if (idx === 0) o.selected = true;
@@ -570,25 +611,40 @@
   /* ── Load pipelines ── */
   async function loadPipelines(target) {
     const sel = document.getElementById('pipeline-select');
-    const noneLabel = sel.dataset.noneLabel || 'none';
     let items = [];
     try {
       const params = target ? { target } : {};
       const resp = await rpcCall('sigma.pipelines.list', params);
+      if (resp.error) {
+        const detail = resp.error.data?.detail || '';
+        showConverterError('No se pudo cargar la lista de pipelines', detail || resp.error.message);
+        setPipelineDisabled(true, 'pipelines unavailable');
+        return;
+      }
       const raw = resp.result?.items || [];
       items = raw
         .map(i => (typeof i === 'string') ? i : (i.identifier || i.name || ''))
         .filter(Boolean);
-    } catch (_) {}
+    } catch (err) {
+      showConverterError('No se pudo cargar la lista de pipelines', err?.message || 'network error');
+      setPipelineDisabled(true, 'pipelines unavailable');
+      return;
+    }
+
+    sel.disabled = false;
     sel.innerHTML = '';
-    const none = document.createElement('option');
-    none.value = ''; none.textContent = noneLabel;
-    sel.appendChild(none);
+    if (!items.length) {
+      // Some targets do not publish predefined pipelines: conversion will run without pipeline.
+      setPipelineDisabled(true, 'no predefined pipelines');
+      return;
+    }
+
     items.forEach(name => {
       const o = document.createElement('option');
       o.value = name; o.textContent = name;
       sel.appendChild(o);
     });
+    sel.selectedIndex = 0;
   }
 
   document.getElementById('backend-select').addEventListener('change', async (event) => {
@@ -599,7 +655,8 @@
   document.getElementById('convert-btn').addEventListener('click', async () => {
     const rule    = document.getElementById('rule-input').value.trim();
     const backend = document.getElementById('backend-select').value.trim();
-    const pipeline = document.getElementById('pipeline-select').value.trim() || null;
+    const pipelineSel = document.getElementById('pipeline-select');
+    const pipeline = pipelineSel.disabled ? null : (pipelineSel.value.trim() || null);
     const out     = document.getElementById('result-output');
     const btn     = document.getElementById('convert-btn');
 
@@ -615,13 +672,23 @@
       out.classList.add('error-output');
       return;
     }
+    if (loadedBackends.size && !loadedBackends.has(backend.toLowerCase())) {
+      out.value = '⚠  backend no valido: recarga la lista y selecciona un destino disponible';
+      out.classList.add('error-output');
+      return;
+    }
 
     btn.disabled = true;
     out.value = '{{ ui.try_loading }}';
 
     try {
       const params = { rule, target: backend };
-      if (pipeline) params.pipeline = pipeline;
+      if (pipeline) {
+        params.pipeline = pipeline;
+      } else {
+        // Pipeline is optional: explicit no-pipeline keeps behavior predictable.
+        params.without_pipeline = true;
+      }
       const resp = await rpcCall('sigma.convert', params);
       if (resp.error) {
         const detail = resp.error.data?.detail ? '\n\n' + resp.error.data.detail : '';

@@ -25,6 +25,12 @@ Implemented modular structure:
 - `app/routes/jsonrpc.py`
 - `app/templates/home.html`
 
+Detailed design documentation:
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/CI_GHCR.md](docs/CI_GHCR.md)
+- [docs/AI_MCP_USAGE.md](docs/AI_MCP_USAGE.md)
+
 ## Available JSON-RPC Methods
 
 - `rpc.discover`
@@ -33,6 +39,25 @@ Implemented modular structure:
 - `sigma.plugins.list`
 - `sigma.validate`
 - `sigma.convert`
+
+## Installed Sigma Backends (Container Build)
+
+The container build installs this curated backend set via [scripts/install_plugins.sh](scripts/install_plugins.sh):
+
+- `pysigma-backend-splunk`
+- `pysigma-backend-elasticsearch`
+- `pysigma-backend-opensearch`
+- `pysigma-backend-microsoft365defender`
+- `pysigma-backend-crowdstrike`
+- `pysigma-backend-loki`
+- `pysigma-backend-secops`
+- `pysigma-backend-chronicle` (optional; may be skipped if unavailable/incompatible)
+- `pysigma-backend-insightidr`
+- `pysigma-backend-qradar`
+- `pysigma-backend-sentinelone`
+- `pysigma-backend-carbonblack`
+
+Note: installed packages and convert targets are related but not always identical naming. To see effective targets exposed by this service, call `sigma.backends.list`.
 
 ## Local Run
 
@@ -65,6 +90,32 @@ docker compose up --build
 
 Service will be available at `http://localhost:8080/`.
 
+## GHCR Tagged Images
+
+This repository publishes container images to GHCR for tagged releases (`v*.*.*`) via GitHub Actions.
+
+Image reference pattern:
+
+- `ghcr.io/<owner>/<repository>:<version>`
+
+Examples:
+
+```bash
+docker pull ghcr.io/<owner>/<repository>:2.1.0
+docker pull ghcr.io/<owner>/<repository>:2.1
+docker pull ghcr.io/<owner>/<repository>:2
+```
+
+You can also use image tags directly in your compose files instead of local builds.
+
+```yaml
+services:
+  sigma-jsonrpc:
+    image: ghcr.io/<owner>/<repository>:2.1.0
+    ports:
+      - "127.0.0.1:8080:8080"
+```
+
 ## Authentication
 
 `/jsonrpc` uses Bearer token authentication according to configuration:
@@ -90,6 +141,15 @@ Modes:
   - `SIGMA_AUTH_REQUIRED=true`
   - `SIGMA_ALLOW_INSECURE_WITHOUT_TOKEN=true`
   - no token configured
+
+## CI Quality Gates and PR Requirements
+
+GitHub Actions workflows in this repository:
+
+- `.github/workflows/ci.yml`: unit tests and syntax gates for pull requests and `main`.
+- `.github/workflows/release-ghcr.yml`: tagged image publishing to GHCR.
+
+To block merges when tests fail, enable branch protection in GitHub and require the `Quality Gates` status check.
 
 ## Allowlists
 
@@ -249,6 +309,17 @@ By default, SPUC now tries to reach a Sigma JSON-RPC service at:
 - `http://localhost:8080/jsonrpc`
 
 This fallback is used when `SIGMA_RPC_URL` is not set and is intentionally probed with a short timeout.
+
+## Using this Service from AI Tools (with or without MCP)
+
+You can use this repository directly as a machine tool through JSON-RPC without MCP.
+
+- Direct integration: call `POST /jsonrpc` from your AI orchestrator.
+- MCP integration: optional; create a thin MCP adapter that maps MCP tools to JSON-RPC methods.
+
+See full integration guidance:
+
+- [docs/AI_MCP_USAGE.md](docs/AI_MCP_USAGE.md)
 
 ## Podman Troubleshooting
 

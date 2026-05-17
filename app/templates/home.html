@@ -563,6 +563,16 @@
     sel.disabled = !!disabled;
   }
 
+  function setPipelineLoading() {
+    const sel = document.getElementById('pipeline-select');
+    sel.innerHTML = '';
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'loading pipelines...';
+    sel.appendChild(opt);
+    sel.disabled = true;
+  }
+
   /* ── Load backends ── */
   const loadedBackends = new Set();
 
@@ -611,6 +621,7 @@
   /* ── Load pipelines ── */
   async function loadPipelines(target) {
     const sel = document.getElementById('pipeline-select');
+    setPipelineLoading();
     let items = [];
     try {
       const params = target ? { target } : {};

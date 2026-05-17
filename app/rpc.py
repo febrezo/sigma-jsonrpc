@@ -31,12 +31,12 @@ class RpcDispatcher:
         self.settings = settings
         self.engine = engine
         self._methods: dict[str, RpcMethod] = {
-            'rpc.discover': self._rpc_discover,
-            'sigma.plugins.list': self._sigma_plugins_list,
-            'sigma.backends.list': self._sigma_backends_list,
-            'sigma.pipelines.list': self._sigma_pipelines_list,
-            'sigma.validate': self._sigma_validate,
-            'sigma.convert': self._sigma_convert,
+            "rpc.discover": self._rpc_discover,
+            "sigma.plugins.list": self._sigma_plugins_list,
+            "sigma.backends.list": self._sigma_backends_list,
+            "sigma.pipelines.list": self._sigma_pipelines_list,
+            "sigma.validate": self._sigma_validate,
+            "sigma.convert": self._sigma_convert,
         }
 
     @property
@@ -50,23 +50,31 @@ class RpcDispatcher:
 
         safe_params = {} if params is None else params
         if not isinstance(safe_params, dict):
-            raise RpcException(INVALID_PARAMS, 'params must be an object')
+            raise RpcException(INVALID_PARAMS, "params must be an object")
 
-        logger.info('rpc method invoked: %s', method)
+        logger.info("rpc method invoked: %s", method)
         try:
             return handler(safe_params)
         except RpcException:
             raise
         except SigmaTimeoutException as exc:
-            raise RpcException(SERVER_TIMEOUT_ERROR, 'sigma command timeout', {'detail': str(exc)}) from exc
+            raise RpcException(
+                SERVER_TIMEOUT_ERROR, "sigma command timeout", {"detail": str(exc)}
+            ) from exc
         except SigmaInputException as exc:
-            code = SERVER_SIZE_ERROR if 'MAX_RULE_SIZE_BYTES' in str(exc) else INVALID_PARAMS
+            code = (
+                SERVER_SIZE_ERROR
+                if "MAX_RULE_SIZE_BYTES" in str(exc)
+                else INVALID_PARAMS
+            )
             raise RpcException(code, str(exc)) from exc
         except SigmaEngineException as exc:
-            raise RpcException(SERVER_SIGMA_ERROR, 'sigma engine error', {'detail': str(exc)}) from exc
+            raise RpcException(
+                SERVER_SIGMA_ERROR, "sigma engine error", {"detail": str(exc)}
+            ) from exc
         except Exception as exc:
-            logger.exception('unexpected internal error in method %s', method)
-            raise RpcException(INTERNAL_ERROR, 'internal error') from exc
+            logger.exception("unexpected internal error in method %s", method)
+            raise RpcException(INTERNAL_ERROR, "internal error") from exc
 
     def _rpc_discover(self, _params: dict[str, Any]) -> dict[str, Any]:
         result = JsonRpcDiscoverResult(
@@ -77,27 +85,27 @@ class RpcDispatcher:
             requires_authentication=self.settings.auth_enabled,
             methods=self.supported_methods,
             active_capabilities={
-                'allowlist_backends': sorted(self.settings.allowed_backends),
-                'allowlist_pipelines': sorted(self.settings.allowed_pipelines),
-                'max_rule_size_bytes': self.settings.max_rule_size_bytes,
-                'command_timeout_seconds': self.settings.sigma_command_timeout,
-                'sigma_available': self.engine.sigma_available(),
+                "allowlist_backends": sorted(self.settings.allowed_backends),
+                "allowlist_pipelines": sorted(self.settings.allowed_pipelines),
+                "max_rule_size_bytes": self.settings.max_rule_size_bytes,
+                "command_timeout_seconds": self.settings.sigma_command_timeout,
+                "sigma_available": self.engine.sigma_available(),
             },
         )
         return result.model_dump()
 
     def _sigma_plugins_list(self, _params: dict[str, Any]) -> dict[str, Any]:
         plugins = [item.model_dump() for item in self.engine.list_plugins()]
-        return {'items': plugins, 'count': len(plugins)}
+        return {"items": plugins, "count": len(plugins)}
 
     def _sigma_backends_list(self, _params: dict[str, Any]) -> dict[str, Any]:
         backends = self.engine.list_backends()
-        return {'items': backends, 'count': len(backends)}
+        return {"items": backends, "count": len(backends)}
 
     def _sigma_pipelines_list(self, _params: dict[str, Any]) -> dict[str, Any]:
-        target = _optional_string(_params, 'target')
+        target = _optional_string(_params, "target")
         pipelines = self.engine.list_pipelines(target=target)
-        return {'items': pipelines, 'count': len(pipelines)}
+        return {"items": pipelines, "count": len(pipelines)}
 
     def _sigma_validate(self, params: dict[str, Any]) -> dict[str, Any]:
         rule = _pick_rule(params)
@@ -105,11 +113,11 @@ class RpcDispatcher:
 
     def _sigma_convert(self, params: dict[str, Any]) -> dict[str, Any]:
         rule = _pick_rule(params)
-        target = _required_string(params, 'target')
-        pipeline = _optional_string(params, 'pipeline')
-        output_format = _optional_string(params, 'format')
-        without_pipeline = _optional_bool(params, 'without_pipeline')
-        if pipeline is None and 'without_pipeline' not in params:
+        target = _required_string(params, "target")
+        pipeline = _optional_string(params, "pipeline")
+        output_format = _optional_string(params, "format")
+        without_pipeline = _optional_bool(params, "without_pipeline")
+        if pipeline is None and "without_pipeline" not in params:
             # Keep conversion resilient for older clients that don't send this flag.
             without_pipeline = True
         return self.engine.convert_rule(
@@ -122,9 +130,9 @@ class RpcDispatcher:
 
 
 def _pick_rule(params: dict[str, Any]) -> str:
-    value = params.get('rule')
+    value = params.get("rule")
     if value is None:
-        value = params.get('rule_text')
+        value = params.get("rule_text")
     if value is None:
         raise RpcException(INVALID_PARAMS, "missing required field 'rule'")
     text = str(value).strip()

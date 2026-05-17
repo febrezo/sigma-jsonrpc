@@ -8,7 +8,9 @@ from app.errors import AuthException
 
 
 def make_request(headers: dict[str, str]) -> Request:
-    raw_headers = [(k.lower().encode("utf-8"), v.encode("utf-8")) for k, v in headers.items()]
+    raw_headers = [
+        (k.lower().encode("utf-8"), v.encode("utf-8")) for k, v in headers.items()
+    ]
     scope = {
         "type": "http",
         "method": "POST",

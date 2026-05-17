@@ -32,7 +32,14 @@ class FakeEngine:
 
         return _Result()
 
-    def convert_rule(self, rule_text: str, target: str, pipeline=None, output_format=None, without_pipeline=False):
+    def convert_rule(
+        self,
+        rule_text: str,
+        target: str,
+        pipeline=None,
+        output_format=None,
+        without_pipeline=False,
+    ):
         self.last_without_pipeline = without_pipeline
         return {
             "target": target,

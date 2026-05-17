@@ -11,10 +11,10 @@ class JsonRpcRequest(BaseModel):
     params: dict[str, Any] | list[Any] | None = None
     id: str | int | None = None
 
-    @field_validator('jsonrpc')
+    @field_validator("jsonrpc")
     @classmethod
     def validate_jsonrpc(cls, value: str) -> str:
-        if value != '2.0':
+        if value != "2.0":
             raise ValueError("jsonrpc must be '2.0'")
         return value
 
@@ -26,7 +26,7 @@ class JsonRpcError(BaseModel):
 
 
 class JsonRpcResponse(BaseModel):
-    jsonrpc: str = '2.0'
+    jsonrpc: str = "2.0"
     id: str | int | None = None
     result: Any | None = None
     error: JsonRpcError | None = None
@@ -46,7 +46,7 @@ class PluginInfo(BaseModel):
     plugin_type: str
     identifier: str
     compatible: bool | None = None
-    description: str = ''
+    description: str = ""
 
 
 class ValidateResult(BaseModel):

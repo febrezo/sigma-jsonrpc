@@ -15,32 +15,36 @@ settings = get_settings()
 
 logging.basicConfig(
     level=settings.log_level.upper(),
-    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 engine = SigmaEngine(settings)
 dispatcher = RpcDispatcher(settings, engine)
-templates = Jinja2Templates(directory='app/templates')
+templates = Jinja2Templates(directory="app/templates")
 
 app = FastAPI(
     title=settings.service_name,
     version=settings.service_version,
     description=settings.service_description,
-    docs_url='/docs',
+    docs_url="/docs",
     redoc_url=None,
 )
 
 
-@app.on_event('startup')
+@app.on_event("startup")
 def startup_event() -> None:
-    logger.info('starting service %s v%s', settings.service_name, settings.service_version)
+    logger.info(
+        "starting service %s v%s", settings.service_name, settings.service_version
+    )
     engine.warm_up_discovery()
     if settings.auth_enabled:
-        logger.info('jsonrpc authentication enabled')
+        logger.info("jsonrpc authentication enabled")
     elif settings.auth_required:
-        logger.warning('jsonrpc authentication is in insecure development mode (no token configured)')
-    logger.info('jsonrpc endpoint: %s', settings.jsonrpc_endpoint)
+        logger.warning(
+            "jsonrpc authentication is in insecure development mode (no token configured)"
+        )
+    logger.info("jsonrpc endpoint: %s", settings.jsonrpc_endpoint)
 
 
 app.include_router(build_http_router(settings, engine, dispatcher, templates))

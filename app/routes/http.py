@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
+from app.auth import enforce_jsonrpc_auth
 from app.config import Settings
 from app.engine import SigmaEngine
+from app.errors import AuthException
 from app.models import HealthResponse, VersionResponse
 from app.rpc import RpcDispatcher
+from app.sigma_bundle import (
+    TranslateSigmaBundleRequest,
+    translate_sigma_bundle,
+)
 
 DEFAULT_LANG = "en"
 SUPPORTED_LANGS = {"en", "es", "fr", "it", "pt", "de", "ru"}
@@ -366,6 +372,7 @@ def build_http_router(
             "sigma.pipelines.list": ui["method_desc_pipelines"],
             "sigma.validate": ui["method_desc_validate"],
             "sigma.convert": ui["method_desc_convert"],
+            "sigma.indicator.bundle": "Sigma indicator to STIX Bundle",
         }
 
         http_endpoints = [
@@ -373,6 +380,11 @@ def build_http_router(
             {"verb": "GET", "path": "/health", "desc": ui["endpoint_health"]},
             {"verb": "GET", "path": "/version", "desc": ui["endpoint_version"]},
             {"verb": "POST", "path": "/jsonrpc", "desc": ui["endpoint_jsonrpc"]},
+            {
+                "verb": "POST",
+                "path": "/api/translate/sigma-bundle",
+                "desc": "STIX Bundle · Sigma indicator → STIX Bundle",
+            },
         ]
 
         auth_configured = bool((settings.sigma_rpc_token or "").strip())
@@ -416,6 +428,50 @@ def build_http_router(
         return VersionResponse(
             service=settings.service_name, version=settings.service_version
         )
+
+    @router.post("/api/translate/sigma-bundle")
+    async def sigma_bundle_endpoint(request: Request) -> JSONResponse:
+        try:
+            enforce_jsonrpc_auth(request, settings)
+        except AuthException as exc:
+            return JSONResponse(
+                status_code=401,
+                content={"error": str(exc)},
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_request_payload"},
+            )
+
+        try:
+            req = TranslateSigmaBundleRequest.model_validate(body)
+        except Exception as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"error": str(exc)},
+            )
+
+        try:
+            bundle = translate_sigma_bundle(
+                engine=engine,
+                indicator=req.indicator,
+                targets=req.targets,
+                pipelines=req.pipelines,
+                without_pipeline=req.without_pipeline,
+                include_source=req.include_source,
+                upstream_objects=req.upstream_objects,
+            )
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_request_payload"},
+            )
+
+        return JSONResponse(content=bundle)
 
     return router
 

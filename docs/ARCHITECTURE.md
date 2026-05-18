@@ -22,11 +22,12 @@ Main modules:
 - app/routes/jsonrpc.py: JSON-RPC transport and protocol behavior.
 - app/rpc.py: method dispatch and domain-level error mapping.
 - app/engine.py: sigma-cli interaction, plugin/target/pipeline discovery, validation, conversion.
-- app/routes/http.py: home page and health/version HTTP endpoints.
+- app/routes/http.py: home page, health/version HTTP endpoints, and `/api/translate/sigma-bundle`.
+- app/sigma_bundle.py: STIX bundle translation logic (models, normalization, conversion evaluation, bundle assembly).
 
 ## Request lifecycle (JSON-RPC)
 
-1. HTTP request arrives at POST /jsonrpc.
+1. HTTP request arrives at POST /jsonrpc or POST /api/translate/sigma-bundle.
 2. app/auth.py validates Authorization header according to current settings.
 3. JSON body is parsed and validated against JSON-RPC 2.0 schema.
 4. app/rpc.py dispatches method call to one of:

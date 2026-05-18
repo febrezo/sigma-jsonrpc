@@ -19,6 +19,10 @@ from app.errors import (
     SigmaTimeoutException,
 )
 from app.models import JsonRpcDiscoverResult
+from app.sigma_bundle import (
+    InputSigmaIndicator,
+    translate_sigma_bundle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,7 @@ class RpcDispatcher:
             "sigma.pipelines.list": self._sigma_pipelines_list,
             "sigma.validate": self._sigma_validate,
             "sigma.convert": self._sigma_convert,
+            "sigma.indicator.bundle": self._sigma_indicator_bundle,
         }
 
     @property
@@ -128,6 +133,44 @@ class RpcDispatcher:
             without_pipeline=without_pipeline,
         )
 
+    def _sigma_indicator_bundle(self, params: dict[str, Any]) -> dict[str, Any]:
+        indicator_raw = params.get("indicator")
+        if not indicator_raw or not isinstance(indicator_raw, dict):
+            raise RpcException(
+                INVALID_PARAMS,
+                "missing required field 'indicator'",
+            )
+        try:
+            indicator = InputSigmaIndicator.model_validate(indicator_raw)
+        except Exception as exc:
+            raise RpcException(INVALID_PARAMS, str(exc)) from exc
+
+        targets = params.get("targets", [])
+        if not targets or not isinstance(targets, list):
+            raise RpcException(INVALID_PARAMS, "missing required field 'targets'")
+
+        pipelines = _optional_dict(params, "pipelines")
+        without_pipeline = params.get("without_pipeline", True)
+        include_source = params.get("include_source", True)
+        upstream_objects = params.get("upstream_objects", [])
+
+        if not isinstance(without_pipeline, bool):
+            raise RpcException(INVALID_PARAMS, "without_pipeline must be a boolean")
+        if not isinstance(include_source, bool):
+            raise RpcException(INVALID_PARAMS, "include_source must be a boolean")
+        if not isinstance(upstream_objects, list):
+            raise RpcException(INVALID_PARAMS, "upstream_objects must be a list")
+
+        return translate_sigma_bundle(
+            engine=self.engine,
+            indicator=indicator,
+            targets=targets,
+            pipelines=pipelines,
+            without_pipeline=without_pipeline,
+            include_source=include_source,
+            upstream_objects=upstream_objects,
+        )
+
 
 def _pick_rule(params: dict[str, Any]) -> str:
     value = params.get("rule")
@@ -157,6 +200,15 @@ def _optional_string(params: dict[str, Any], key: str) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_dict(params: dict[str, Any], key: str) -> dict[str, Any] | None:
+    value = params.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RpcException(INVALID_PARAMS, f"field '{key}' must be an object")
+    return value
 
 
 def _optional_bool(params: dict[str, Any], key: str) -> bool:

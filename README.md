@@ -9,6 +9,7 @@ It also exposes auxiliary HTTP endpoints for human use and operations:
 - `GET /`
 - `GET /health`
 - `GET /version`
+- `POST /api/translate/sigma-bundle` (STIX Bundle translation)
 
 ## Architecture
 
@@ -39,6 +40,7 @@ Detailed design documentation:
 - `sigma.plugins.list`
 - `sigma.validate`
 - `sigma.convert`
+- `sigma.indicator.bundle`
 
 ## Installed Sigma Backends (Container Build)
 
@@ -283,6 +285,118 @@ curl -X POST http://localhost:8080/jsonrpc \
   -H "Authorization: Bearer CHANGE_ME" \
   -d '{"jsonrpc":"2.0","id":"3b","method":"sigma.convert","params":{"target":"splunk","without_pipeline":true,"rule":"title: Test Rule\nlogsource:\n  category: process_creation\ndetection:\n  selection:\n    Image|endswith: '\''\\\\cmd.exe'\''\n  condition: selection"}}'
 ```
+
+## Sigma indicator to STIX bundle
+
+This endpoint translates a STIX 2.1 Indicator with `pattern_type: "sigma"` into a STIX Bundle containing the original Sigma indicator, derived indicators for each target backend, and `derived-from` relationships between them.
+
+### `POST /api/translate/sigma-bundle`
+
+```bash
+curl -sS -X POST http://localhost:8080/api/translate/sigma-bundle \
+  -H "Authorization: Bearer ${SIGMA_RPC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "indicator": {
+    "type": "indicator",
+    "id": "indicator--22222222-2222-4222-8222-222222222222",
+    "name": "Sigma process creation example",
+    "description": "Source Sigma rule",
+    "pattern_type": "sigma",
+    "pattern": "title: Suspicious Cmd\nlogsource:\n  category: process_creation\ndetection:\n  selection:\n    Image|endswith: '\''\\\\cmd.exe'\''\n  condition: selection",
+    "confidence": 80
+  },
+  "targets": ["splunk", "eql"],
+  "without_pipeline": true
+}'
+```
+
+### `sigma.indicator.bundle` (JSON-RPC)
+
+```bash
+curl -sS -X POST http://localhost:8080/jsonrpc \
+  -H "Authorization: Bearer ${SIGMA_RPC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"1","method":"sigma.indicator.bundle","params":{"indicator":{"type":"indicator","id":"indicator--22222222-2222-4222-8222-222222222222","name":"Sigma process creation","pattern_type":"sigma","pattern":"title: Suspicious Cmd\ndetection:\n  selection:\n    Image|endswith: '\''\\\\cmd.exe'\''\n  condition: selection","confidence":80},"targets":["splunk"]}}'
+```
+
+### Request fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `indicator` | yes | STIX Indicator object with `pattern_type: "sigma"` |
+| `indicator.type` | yes | Must be `"indicator"` |
+| `indicator.pattern_type` | yes | Must be `"sigma"` |
+| `indicator.pattern` | yes | Non-empty Sigma YAML rule |
+| `targets` | yes | List of backend targets (e.g. `["splunk", "eql"]`) |
+| `pipelines` | no | Optional mapping `{"<target>": "<pipeline>"}` |
+| `without_pipeline` | no | Default `true` |
+| `include_source` | no | Default `true` — include the source Sigma indicator in output |
+| `upstream_objects` | no | Optional array of STIX objects to preserve (for chaining) |
+
+### Response
+
+```json
+{
+  "type": "bundle",
+  "spec_version": "2.1",
+  "id": "bundle--<uuid>",
+  "objects": [
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--22222222-2222-4222-8222-222222222222",
+      "name": "Sigma process creation example",
+      "description": "Source Sigma rule",
+      "pattern_type": "sigma",
+      "pattern": "title: Suspicious Cmd\n...",
+      "confidence": 80,
+      "labels": ["sigma-jsonrpc", "source", "sigma"]
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--<uuid>",
+      "name": "Sigma process creation example [splunk]",
+      "description": "Source Sigma rule\n\nSTIX Indicator automatically generated from the source Sigma rule.",
+      "pattern_type": "splunk",
+      "pattern": "converted_splunk",
+      "confidence": 80,
+      "labels": ["sigma-jsonrpc", "auto-generated", "splunk"],
+      "x_sigma_jsonrpc_target": "splunk",
+      "x_sigma_jsonrpc_engine": "sigma-cli"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--<uuid>",
+      "relationship_type": "derived-from",
+      "source_ref": "indicator--<derived-uuid>",
+      "target_ref": "indicator--22222222-2222-4222-8222-222222222222",
+      "confidence": 80
+    }
+  ]
+}
+```
+
+### Error handling
+
+- `401` — missing or invalid Bearer token
+- `400` — invalid payload, unsupported `pattern_type`, empty `pattern`, empty `targets`
+- `200` with `"status": "error"` — all conversions failed
+- `200` with `x_sigma_jsonrpc_conversion_errors` — partial conversion failures
+
+### Chaining with SPUC
+
+This endpoint is designed to chain with SPUC's `/api/translate/stix-bundle`:
+
+1. SPUC receives a STIX Pattern indicator → returns a bundle with a derived Sigma indicator
+2. Extract the Sigma indicator from SPUC's bundle
+3. Send it to sigma-jsonrpc's `/api/translate/sigma-bundle`
+4. The output bundle can include `upstream_objects` from SPUC's bundle
+5. The full chain: `STIX Pattern <- Sigma <- Splunk/EQL/Elastic` via `derived-from` relationships
+
+Note: `derived-from` expresses transformation lineage, not semantic equivalence. If a conversion loses fidelity, that should be reflected in `description`, `confidence`, or `x_*` fields.
 
 ### sigma.validate
 
